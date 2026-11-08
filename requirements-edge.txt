@@ -1,0 +1,7 @@
+# 엣지 노트북(Windows/macOS/Linux, GPU 불필요). PyTorch 불필요.
+numpy==1.26.4
+opencv-python==4.10.0.84
+onnx>=1.12,<1.18
+onnxruntime==1.20.1
+requests
+scikit-learn==1.5.2

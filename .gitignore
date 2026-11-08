@@ -1,0 +1,15 @@
+# 데이터·모델·결과는 저장소에 올리지 않는다 (용량, SHIFT 라이선스상 재배포 금지)
+data/
+models/
+runs/
+results/*.npz
+__pycache__/
+*.pyc
+.venv/
+.ipynb_checkpoints/
+*.pt
+*.onnx
+# 합성 데모용 작은 모델(약 22MB)은 올린다 — 데이터 없이 바로 데모를 돌리기 위함
+!models_toy/
+!models_toy/*.pt
+!models_toy/*.onnx

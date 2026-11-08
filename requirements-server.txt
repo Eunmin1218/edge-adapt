@@ -1,0 +1,18 @@
+# 서버(Ubuntu + NVIDIA GPU). torch/torchvision 은 아래 줄을 먼저 별도 설치한다:
+#   pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu124
+numpy==1.26.4
+ultralytics==8.3.40
+onnx>=1.12,<1.18
+onnxslim
+onnxruntime==1.20.1
+opencv-python==4.10.0.84
+fastapi
+uvicorn[standard]
+python-multipart
+requests
+scikit-learn==1.5.2
+pandas
+matplotlib
+pyyaml
+pytest
+huggingface_hub

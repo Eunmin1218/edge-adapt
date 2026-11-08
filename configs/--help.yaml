@@ -1,0 +1,10 @@
+path: /home/claude/edge-adapt/data/yolo
+train: --help_train/images
+val: --help_val/images
+names:
+  0: pedestrian
+  1: car
+  2: truck
+  3: bus
+  4: motorcycle
+  5: bicycle
