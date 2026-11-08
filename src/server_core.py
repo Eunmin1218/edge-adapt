@@ -77,6 +77,18 @@ class AdapterServer:
             m = iou_matrix(tb, eb) * (tc[:, None] == ec[None, :]); vals.append(float((m.max(1) >= iou_thr).mean()))
         return float(np.mean(vals)) if vals else 1.0
 
+    def agreement_f1(self, frames, dets, iou_thr=0.5):
+        """Teacher 일치도(양방향): Teacher 박스(신뢰도 >= tau)와 엣지 박스를 같은 클래스·IoU >= iou_thr 로 짝지어 재현율(Teacher 박스 중 맞춘 비율)과 정밀도(엣지 박스 중 Teacher 와 맞는 비율)의 평균을 프레임별로 구해 평균한다.
+        `agreement` 는 재현율만 보므로 오검출이 늘어나는 어댑터(물체가 적은 장면에서 흔함)를 알아채지 못한다. 둘 다 박스가 없는 프레임은 제외, 전부 없으면 1.0."""
+        from .mapeval import iou_matrix
+        res = self.teacher.predict(frames, imgsz=self.imgsz, conf=self.tau, iou=0.5, device=self.device, verbose=False); vals = []
+        for r, (eb, es, ec) in zip(res, dets):
+            tb, tc = r.boxes.xyxy.cpu().numpy(), r.boxes.cls.cpu().numpy().astype(int)
+            if len(tb) == 0 and len(eb) == 0: continue
+            if len(tb) == 0 or len(eb) == 0: vals.append(0.0); continue
+            m = iou_matrix(tb, eb) * (tc[:, None] == np.asarray(ec)[None, :]); vals.append(0.5 * float((m.max(1) >= iou_thr).mean() + (m.max(0) >= iou_thr).mean()))
+        return float(np.mean(vals)) if vals else 1.0
+
     def _train_ultra(self, job, frames, env_id):
         (job / "images").mkdir(parents=True, exist_ok=True); (job / "labels").mkdir(exist_ok=True)
         labs = self.pseudo_label(frames); buf = self.replay.setdefault(env_id, []); buf += list(zip(frames, labs)); buf[:] = buf[-self.replay_max:]

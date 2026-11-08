@@ -27,7 +27,8 @@ def recovery(r):
 def key(r):
     a = r["args"]; m = a["method"]
     if m == "D": return f"D({a['selector']}, B={a['budget']}, 신호={a['cols']}{', 레지스트리X' if a['no_registry'] else ''}{', consec=' + str(a['consec']) if a.get('consec', 1) != 1 else ''}{', tau=' + str(a['tau']) if a.get('tau_explicit', False) else ''})"
-    if m == "ES": return f"ES(B={a['budget']}, theta={a.get('theta', 0.15)})"
+    if m == "ES": return f"ES(B={a['budget']}, theta={a.get('theta', 0.15)}{', ' + a['es_codec'] if a.get('es_codec', 'auto') != 'auto' else ''})"
+    if m == "V7": return f"V7(B={a['budget']}, {a.get('codec', 'pack4')})"
     if m in ("B", "AMS", "RECL"): return f"{m}(period={a['period']}, B={a['budget']})"
     if m == "C": return f"C({a['tent']})"
     return m
@@ -49,7 +50,7 @@ import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
 plt.rcParams["font.family"] = ["Malgun Gothic", "AppleGothic", "NanumGothic", "DejaVu Sans"]; plt.rcParams["axes.unicode_minus"] = False
 plt.figure(figsize=(10, 4))
 for k, rs in g.items():
-    if k in ("A", "T") or k.startswith("C(") or k.startswith("B(period") and "B=16" in k or k.startswith("D(diversity, B=16, 신호=all)") or k.startswith("ES(B=16, theta=0.15)"):
+    if k in ("A", "T") or k.startswith("C(") or k.startswith("B(period") and "B=16" in k or k.startswith("D(diversity, B=16, 신호=all)") or k.startswith("ES(B=16, theta=0.15") or k.startswith("V7(B=16"):
         plt.plot(np.nanmean([x["win_map"] for x in rs], 0), label=k)
 plt.xlabel(f"window index ({win} frames each)"); plt.ylabel("mAP50"); plt.legend(fontsize=7); plt.tight_layout(); plt.savefig(ROOT / "results/curves.png", dpi=150)
 print("저장: results/summary.md, results/curves.png")

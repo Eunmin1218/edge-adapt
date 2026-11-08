@@ -80,9 +80,9 @@ class StreamRunner:
     """한 엣지 에이전트. step(img, gt, env) 를 프레임마다 호출한다. state 는 UI 표시용(영문 키):
     static | normal | drift | adapting | offline | recovered | switched | rollback | error"""
     def __init__(self, detector, policy, server, selector="hybrid", budget=16, win=50, pool_size=100, apply_delay=50, rollback_margin=0.05,
-                 use_registry=True, seed=0, n_cls=6, env_thr=0.08, probe_fn=None, verify_margin=None, edge_fn=None, edge_sig=None, sig_thr=0.25, gate_margin=0.08, edge_n=12, fast_n=0, fast_margin=0.1, verify_edge=False, agree_thr=None, confirm=False, min_post=0, probe_n=6, probe_q=80, probe_scale=1.0, train_q=80, codec="auto", heldout=False, edge_delay=0, conf_tie=0.0, t0=None, lf_verify=False, lf_margin=0.0, gate_since=False, fc_margin=None, srv_trust=False, srv_all=False, lf_or=False):
+                 use_registry=True, seed=0, n_cls=6, env_thr=0.08, probe_fn=None, verify_margin=None, edge_fn=None, edge_sig=None, sig_thr=0.25, gate_margin=0.08, edge_n=12, fast_n=0, fast_margin=0.1, verify_edge=False, agree_thr=None, confirm=False, min_post=0, probe_n=6, probe_q=80, probe_scale=1.0, train_q=80, codec="auto", heldout=False, edge_delay=0, conf_tie=0.0, t0=None, lf_verify=False, lf_margin=0.0, gate_since=False, fc_margin=None, srv_trust=False, srv_all=False, lf_or=False, srv_verify=False, ho_n=2, ho_boxes=0):
         self.fc_margin, self.ref_fc = fc_margin, None
-        self.srv_trust, self.srv_all, self.lf_or = srv_trust, srv_all, lf_or; self.t0, self.lf_verify, self.lf_margin, self.gate_since = t0, lf_verify, lf_margin, gate_since; self.t0_S, self.t0_on, self.t0_calm = 0.0, False, 0
+        self.srv_trust, self.srv_all, self.lf_or = srv_trust, srv_all, lf_or; self.srv_verify, self.ho_n, self.ho_boxes = srv_verify, ho_n, ho_boxes; self.t0, self.lf_verify, self.lf_margin, self.gate_since = t0, lf_verify, lf_margin, gate_since; self.t0_S, self.t0_on, self.t0_calm = 0.0, False, 0
         self.conf_tie = conf_tie; self.edge_delay, self.edge_ready = edge_delay, None
         self.heldout, self.train_t = heldout, set()
         self.probe_n, self.probe_q, self.probe_scale, self.train_q, self.codec = probe_n, probe_q, probe_scale, train_q, codec
@@ -118,8 +118,24 @@ class StreamRunner:
             _apply(self.det, adapter); return self.probe_fn(sv, [(d["boxes"], d["scores"], d["cls"]) for d in map(self.det.infer, fr)])
         cur, cand = score(self.cur_adapter), score(ad); _apply(self.det, self.cur_adapter); return cand >= cur + 0.02
 
+    def _server_verify(self, ad):
+        """서버 쪽 수락 판정(Teacher 일치도): 후보 어댑터와 엣지의 현재 어댑터를 같은 보류 프레임에서 Teacher 상자와 비교한다. 후보가 현재보다 나쁘면 False. 보류 프레임이 없으면 None(판정 불가)."""
+        ho = self.pending.get("ho")
+        if not ho: return None
+        fr, dets_cur = ho; _apply(self.det, ad); dets_c = [self.det.infer(f) for f in fr]; _apply(self.det, self.cur_adapter)
+        a_c = self.server.agreement(fr, [(d["boxes"], d["scores"], d["cls"]) for d in dets_c]); a_0 = self.server.agreement(fr, dets_cur); self.events.append(("sv", self.t, round(a_0, 2), round(a_c, 2)))
+        return a_c >= a_0
+
     def _finish_pending(self, t):
-        if self.edge_sig is not None and (self.probe_fn is not None or self.lf_verify) and not self.srv_trust and not self._verify_candidate(self.pending["ad"]):
+        if self.srv_verify:
+            ok = self._server_verify(self.pending["ad"])
+            if ok is False:
+                self.refined.add(self.pending["env"]); self.events.append(("reject", t)); self.pending = None; self.state = "recovered"; return
+            if ok is True: self.down += self.pending.get("nb", 0)
+            elif ok is None and self.edge_sig is not None and self.lf_verify and not self._verify_candidate(self.pending["ad"]):
+                self.refined.add(self.pending["env"]); self.events.append(("reject", t)); self.pending = None; self.state = "recovered"; return
+            else: self.down += self.pending.get("nb", 0)
+        if not self.srv_verify and self.edge_sig is not None and (self.probe_fn is not None or self.lf_verify) and not self.srv_trust and not self._verify_candidate(self.pending["ad"]):
             self.refined.add(self.pending["env"]); self.events.append(("reject", t)); self.pending = None; self.state = "recovered"; return
         p = self.pending; self.prev_adapter = self.cur_adapter; _apply(self.det, p["ad"]); self.cur_adapter = p["ad"]; self.cur_env = p["env"]
         if self.use_registry and p["env"] < len(self.reg.adapters): self.reg.adapters[p["env"]] = p["ad"]
@@ -166,7 +182,7 @@ class StreamRunner:
                 st = getattr(h, "status", "running")
                 if st == "error": self.pending = None; self.state = "error"
                 elif h.ready():
-                    ad = h.result(); ad, nb = ship(ad, getattr(self.det, "_base", None)); self.down += nb; self.pending["ad"] = ad; self._finish_pending(t)
+                    ad = h.result(); ad, nb = ship(ad, getattr(self.det, "_base", None)); (self.pending.__setitem__("nb", nb) if self.srv_verify else setattr(self, "down", self.down + nb)); self.pending["ad"] = ad; self._finish_pending(t)
                 else: self.state = "offline" if st == "queued" else "adapting"
         if (t + 1) % win == 0: self._window_end(t)
         elif self.edge_sig is not None and self.fast_n and self.ref_conf is not None and (t + 1) % self.fast_n == 0: self._fast_check(t)
@@ -196,10 +212,23 @@ class StreamRunner:
         cands = {"uncert": np.array([p["u"] for p in P]), "emb": np.stack([p["e"] for p in P]), "ent": np.array([p["ent"] for p in P]), "age": np.array([t - p["t"] for p in P], float)}
         _sel = self.sel(cands, self.budget, self.rng); self.train_t = {P[i]["t"] for i in _sel}
         frames, nb = wire([P[i]["img"] for i in _sel], self.train_q); self.up += nb
+        ho = None
+        if self.srv_verify:                                                      # 서버 쪽 검증: 학습에 쓰지 않은 최근 프레임 ho_n 장 + 엣지가 그 프레임에서 낸 상자(현재 어댑터)를 함께 올린다. 서버가 Teacher 일치도를 후보/현재로 비교해 나쁜 어댑터는 보내지 않는다
+            Pc = [p for p in P if p["t"] not in self.train_t]; Ph = Pc[-self.ho_n:]
+            if self.ho_boxes and Pc:                                             # 적응형: 일치도는 박스 수가 적으면 잡음이 크므로(물체가 1~2개인 장면) 엣지가 본 박스가 ho_boxes 개 이상 모일 때까지(최대 ho_n 장) 최근 프레임부터 보탠다
+                Ph, nb_ = [], 0; _apply(self.det, self.cur_adapter)
+                for p in reversed(Pc):
+                    Ph.insert(0, p); nb_ += len(self.det.infer(p["img"])["boxes"])
+                    if nb_ >= self.ho_boxes or len(Ph) >= self.ho_n: break
+            if Ph:
+                hf, hb = wire([p["img"] for p in Ph], self.train_q); _apply(self.det, self.cur_adapter); dets = [self.det.infer(f) for f in [p["img"] for p in Ph]]
+                nbox = sum(len(d["boxes"]) for d in dets); self.up += hb + 9 * nbox; self.edge_frames += len(Ph); ho = (hf, [(d["boxes"], d["scores"], d["cls"]) for d in dets])
         out = self.server(frames, env_id); env_after = env_id if self.use_registry else 0
         if isinstance(out, dict):
-            out, nb = ((out, self.server.last_bytes) if getattr(self.server, "last_bytes", None) is not None else ship(out, getattr(self.det, "_base", None), self.codec)); self.down += nb; self.pending = {"handle": None, "ready_t": t + self.apply_delay, "ad": out, "env": env_after}
-        else: self.pending = {"handle": out, "ready_t": None, "ad": None, "env": env_after}
+            out, nb = ((out, self.server.last_bytes) if getattr(self.server, "last_bytes", None) is not None else ship(out, getattr(self.det, "_base", None), self.codec))
+            if not self.srv_verify: self.down += nb
+            self.pending = {"handle": None, "ready_t": t + self.apply_delay, "ad": out, "env": env_after, "ho": ho, "nb": nb}
+        else: self.pending = {"handle": out, "ready_t": None, "ad": None, "env": env_after, "ho": ho, "nb": 0}
         self.events.append(("trigger", t, env_id, len(frames))); self.state = "adapting"
 
     def _edge_apply(self, t, sig, fr):

@@ -27,13 +27,15 @@ ap.add_argument("--epochs", type=int, default=None, help="기본: configs/adapte
 ap.add_argument("--tau", type=float, default=None, help="Teacher 의사 라벨 신뢰도 임계값(필터). 민감도 실험에서 0.3/0.5/0.7 비교")
 ap.add_argument("--theta", type=float, default=0.15, help="ES: Teacher 일치도 하락(긴급도) 임계값"); ap.add_argument("--probe-n", type=int, default=4, help="ES: 윈도우마다 서버 Teacher 로 보내는 프로브 프레임 수")
 ap.add_argument("--device", default="auto", help="서버 학습·Teacher 추론 장치: auto | cpu | 0"); ap.add_argument("--env-thr", type=float, default=0.08, help="환경 서명 거리 임계값 (scripts/env_sig_check.py 로 정한다)")
-ap.add_argument("--edge-delay", type=int, default=13, help="V7: 엣지 통계 정렬 계산 지연(프레임)"); ap.add_argument("--codec", default="pack4", help="V7: 어댑터 부호화 pack4 | pack16"); ap.add_argument("--force", action="store_true", help="이미 results/<tag>.json 이 있어도 다시 실행 (기본: 건너뜀 — 끊긴 실험을 이어서 돌리기 위함)")
+ap.add_argument("--edge-delay", type=int, default=13, help="V7: 엣지 통계 정렬 계산 지연(프레임)"); ap.add_argument("--codec", default="pack4", help="V7: 어댑터 부호화 pack4 | pack16"); ap.add_argument("--es-codec", default="auto", help="ES 의 어댑터 부호화(공정 비교용: pack4 를 주면 V7 과 같은 4비트 압축을 ES 에도 적용)"); ap.add_argument("--force", action="store_true", help="이미 results/<tag>.json 이 있어도 다시 실행 (기본: 건너뜀 — 끊긴 실험을 이어서 돌리기 위함)")
 a = ap.parse_args()
 a.tau_explicit = a.tau is not None            # 민감도 실험(--tau 직접 지정)인지 표시
 from src.server_core import load_adapter_cfg
 _cfg = load_adapter_cfg()
 for _k, _a in (("epochs", "epochs"), ("lr", "lr"), ("train_layers", "train_layers"), ("tau", "tau"), ("batch", "batch"), ("lrf", "lrf"), ("trainer", "trainer"), ("selector", "selector")):
     if getattr(a, _a) is None: setattr(a, _a, _cfg[_k])          # 인자를 안 주면 튜닝 결과(없으면 기본값). 결과 json 의 args 에 실제 사용한 값이 저장된다
+from src.adapter_cfg import server_kwargs
+SRV_KW = {**server_kwargs(_cfg), "tau": a.tau, "epochs": a.epochs, "lr": a.lr, "train_layers": a.train_layers, "batch": a.batch, "lrf": a.lrf, "trainer": a.trainer}   # 모든 방법의 서버가 같은 학습 설정(mode/alpha/aug 포함)을 쓰도록 한 곳에서 만든다 — 공정 비교
 if (ROOT / "results" / f"{a.tag}.json").exists() and not a.force: print(f"건너뜀: results/{a.tag}.json 이 이미 있습니다 (--force 로 재실행)"); sys.exit(0)
 
 cols = {"all": ALL_COLS, "conf": CONF_COLS, "temp": TEMP_COLS}[a.cols]
@@ -58,10 +60,10 @@ else:
         if a.method == "E+":
             from src.server_core import AdapterServer
             from src.adapter_cfg import server_kwargs
-            server = AdapterServer(ROOT / "models/student.pt", ROOT / "models/student.onnx", ROOT / "models/teacher.pt", ROOT / "runs/server_work" / a.tag, device=a.device, **server_kwargs(_cfg))
+            server = AdapterServer(ROOT / "models/student.pt", ROOT / "models/student.onnx", ROOT / "models/teacher.pt", ROOT / "runs/server_work" / a.tag, device=a.device, **SRV_KW)
     else:
         from src.server_core import AdapterServer
-        server = None if a.method == "V7" else AdapterServer(ROOT / "models/student.pt", ROOT / "models/student.onnx", ROOT / "models/teacher.pt", ROOT / "runs/server_work" / a.tag, tau=a.tau, epochs=a.epochs, lr=a.lr, train_layers=a.train_layers, batch=a.batch, lrf=a.lrf, trainer=a.trainer, device=(int(a.device) if a.device.isdigit() else a.device))
+        server = None if a.method == "V7" else AdapterServer(ROOT / "models/student.pt", ROOT / "models/student.onnx", ROOT / "models/teacher.pt", ROOT / "runs/server_work" / a.tag, device=(int(a.device) if a.device.isdigit() else a.device), **SRV_KW)
         if a.method in ("B", "RECL"): policy = Policy("periodic", period=a.period)     # RECL-lite = 주기적 재학습 + 저장 모델 재사용(레지스트리)
         elif a.method == "AMS": policy = Policy("ams", period=a.period)
         elif a.method == "ES": policy = Policy("edgesync", theta=a.theta, probe_n=a.probe_n)
@@ -75,16 +77,25 @@ if a.method == "V7":                                                          # 
     from src.v7_agent import make_v7_runner
     _tr = load_stream(ROOT / "data/yolo/stream_train", json.load(open(ROOT / "configs/streams.json"))["detector_train"], multiple=a.win); _clear = [it["img"] for it in _tr if it["env"] == "clear"]
     _src = [_clear[i] for i in np.linspace(0, len(_clear) - 1, 60).astype(int)]
-    server = AdapterServer(ROOT / "models/student.pt", ROOT / "models/student.onnx", ROOT / "models/teacher.pt", ROOT / "runs/server_work" / a.tag, device=a.device, **server_kwargs(_cfg))
+    server = AdapterServer(ROOT / "models/student.pt", ROOT / "models/student.onnx", ROOT / "models/teacher.pt", ROOT / "runs/server_work" / a.tag, device=a.device, **SRV_KW)
     _rn = make_v7_runner(det, ROOT / "models/student.pt", _src, server, budget=a.budget, win=a.win, edge_delay=a.edge_delay, codec=a.codec, apply_delay=a.delay, seed=a.seed)
     for it in stream: _rn.step(it["img"], it["gt"], it["env"])
     r = _rn.result()
 else:
-  r = run_stream(stream, det, policy, server, selector=sel, budget=a.budget, win=a.win, apply_delay=a.delay, use_registry=(a.method in ("D", "RECL", "E", "E+") and not a.no_registry), seed=a.seed, env_thr=(0.25 if a.method in ("E", "E+") and a.env_thr == 0.08 else a.env_thr), probe_fn=(server.agreement if a.method in ("ES", "E+") else None), **_ek)
+  r = run_stream(stream, det, policy, server, selector=sel, budget=a.budget, win=a.win, apply_delay=a.delay, use_registry=(a.method in ("D", "RECL", "E", "E+") and not a.no_registry), seed=a.seed, env_thr=(0.25 if a.method in ("E", "E+") and a.env_thr == 0.08 else a.env_thr), probe_fn=(server.agreement if a.method in ("ES", "E+") else None), codec=(a.es_codec if a.method == "ES" else "auto"), **_ek)
+
+def _jsonable(x):
+    """이벤트 튜플(문자열·정수·실수·리스트 혼합; V7 의 probe 이벤트는 리스트를 포함)을 JSON 저장 가능한 값으로 바꾼다."""
+    if isinstance(x, (list, tuple)): return [_jsonable(v) for v in x]
+    if isinstance(x, (str, bool)) or x is None: return x
+    if isinstance(x, (int, np.integer)): return int(x)
+    if isinstance(x, (float, np.floating)): return float(x)
+    return str(x)
+
 
 env = np.array(r["win_env"]); wm = r["win_map"]
 shift = np.array([e != "clear" for e in env])
-out = {"tag": a.tag, "args": vars(a), "win_map": wm.tolist(), "win_env": r["win_env"], "events": [[x if isinstance(x, str) else int(x) for x in e] for e in r["events"]],
+out = {"tag": a.tag, "args": vars(a), "win_map": wm.tolist(), "win_env": r["win_env"], "events": [_jsonable(e) for e in r["events"]],
        "map_all": evaluate(r["preds"], r["gts"], 6), "map_shift_windows": float(np.nanmean(wm[shift])) if shift.any() else None,
        "map_fog_windows": float(np.nanmean(wm[env == "fog"])) if (env == "fog").any() else None,
        "up_bytes": r["up_bytes"], "down_bytes": r["down_bytes"], "n_trigger": sum(e[0] in ("trigger", "edge") for e in r["events"]), "edge_extra": r.get("edge_extra"), "lat_ms": r["lat_ms"]}

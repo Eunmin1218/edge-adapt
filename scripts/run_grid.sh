@@ -10,6 +10,8 @@ for s in $SEEDS; do
     $R --method AMS  --budget $b --delay $DELAY --seed $s --tag AMS_b${b}_s${s}
     $R --method RECL --budget $b --delay $DELAY --seed $s --tag RECL_b${b}_s${s}
     $R --method ES   --budget $b --delay $DELAY --seed $s --tag ES_b${b}_s${s}
+    $R --method ES   --budget $b --delay $DELAY --seed $s --es-codec pack4 --tag ESq4_b${b}_s${s}      # 공정 비교: ES 에도 같은 4비트 압축
+    $R --method V7   --budget $b --delay $DELAY --seed $s --tag V7_b${b}_s${s}                         # 제안 최종판(V7q, GUIDE 5.6.6)
     for sel in random uncertainty diversity hybrid entropy ent_hybrid; do
       $R --method D --selector $sel --budget $b --delay $DELAY --seed $s --tag D_${sel}_b${b}_s${s}
     done

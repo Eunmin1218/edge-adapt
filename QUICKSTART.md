@@ -176,21 +176,37 @@ python scripts/demo.py --source toy --models models_toy --server http://127.0.0.
 
 ---
 
-## 단계 5. (나중에) SHIFT 실데이터 — Colab 에서 모델 만들기 *(미검증)*
+## 단계 5. (단계 4가 끝난 뒤) SHIFT 실데이터 — Colab 에서 모델을 만들고 비교 실험 *(미검증: 이 경로는 아직 한 번도 실제로 돌려 보지 못했다)*
 
-1. **zip 올리기:** `https://drive.google.com` → **+ 새로 만들기 → 파일 업로드** → `edge-adapt.zip` 선택. 올라간 뒤 **내 드라이브 맨 위(폴더 안이 아님)** 에 있어야 한다.
-2. **Colab 열기:** `https://colab.research.google.com` → **파일 → 노트북 업로드 → 탭 "업로드" → `C:\edge-adapt\colab\edge_adapt_colab.ipynb`** 선택.
-3. **GPU 켜기:** 메뉴 **런타임 → 런타임 유형 변경 → 하드웨어 가속기 "T4 GPU" → 저장**.
-4. **실행:** 첫 셀부터 **왼쪽 ▶ 버튼을 위에서 아래로 한 칸씩** 누른다. 한 셀이 끝나(▶ 옆 초록 체크) 다음 셀로 간다. "드라이브 연결 허용" 창이 뜨면 **허용**. SHIFT 데이터는 노트북 안내대로 받는다(라이선스상 재배포 불가).
-5. **결과:** 마지막 셀이 `laptop_bundle.zip` 을 만든다 → Colab 왼쪽 **폴더 아이콘 → 파일 우클릭 → 다운로드**.
-6. **노트북에 넣기:** 받은 zip 을 `C:\edge-adapt\models\` 에 풀어 `models\student.pt`, `models\student.onnx`, `models\teacher.pt` 가 바로 보이게 한다. 그다음 [서버 창]/[엣지 창]에서:
+**먼저 알아둘 것**
+- SHIFT 데이터는 Colab 안에서 받는다(노트북이 Hugging Face 미러에서 내려받음; 내 노트북에 따로 받을 필요 없음). 크기는 셀 5 가 다운로드 전에 알려준다. 공식 서버가 내려가 있을 수 있어 이산(10Hz) 비디오를 환경 순서대로 이어 붙인 스트림을 쓴다(GUIDE 0.4절).
+- 노트북에는 실험 두 가지가 들어 있다: ① 셀 1~13 데이터 준비·Student/Teacher 학습 ② 셀 27~30 본 실험(`run_grid.sh`). 본 실험에는 이제 **ES(기본), ES(4비트), V7(제안 최종판)** 이 모두 들어 있어 같은 조건으로 비교된다.
+- 시간: `PROFILE = "free"`(셀 6, 기본)이 무료 Colab 용 축소판이다. 무료 GPU 는 사용 시간 제한이 있어 중간에 끊길 수 있는데, 학습 결과가 구글 드라이브에 저장되고 다시 실행하면 이어서 한다.
+
+**5-1. 업로드와 열기**
+1. `https://drive.google.com` → **+ 새로 만들기 → 파일 업로드** → `edge-adapt.zip` 선택. **내 드라이브 맨 위(폴더 안이 아님)** 에 있어야 한다.
+2. `https://colab.research.google.com` → **파일 → 노트북 업로드 → "업로드" 탭 → `C:\edge-adapt\colab\edge_adapt_colab.ipynb`**.
+3. **런타임 → 런타임 유형 변경 → T4 GPU → 저장**.
+
+**5-2. 실행** — 셀 왼쪽 **▶ 버튼을 위에서 아래로 한 칸씩** 누른다. 한 셀이 끝나(초록 체크) 다음 셀로 간다. "드라이브 연결 허용" 창이 뜨면 **허용**.
+- 셀 10(`--dry-run`)에서 **다운로드 크기와 남은 디스크**를 확인한다. 공간이 모자라면 멈추고 알려 달라.
+- 셀 13은 **변환 결과를 눈으로 확인**하는 셀이다. 사진에 박스가 물체 위에 정확히 그려져 있는지 본다(어긋나 있으면 이후 결과는 전부 무의미하다).
+- 셀 20은 "필수 관문"이다. 여기서 오류가 나면 더 진행하지 않는다.
+- 막힌 셀 번호와 빨간 오류 마지막 줄을 알려 주면 고친다.
+
+**5-3. 결과 보는 곳**
+- 셀 30 이 `results/summary.md`(방법별 표)와 `results/curves.png` 를 만든다. 표에서 볼 행: `A`(적응 없음), `ES(B=16, theta=0.15)`(기본 ES), `ES(B=16, theta=0.15, pack4)`(4비트 ES), `V7(B=16, pack4)`(제안).
+- 표의 열: 변화구간 mAP50, 업링크 KB, 다운링크 KB, 회복시간, 적응 횟수. 이 표를 그대로 복사해서 보내 주면 해석한다.
+
+**5-4. 내 노트북에서 실제 영상 데모 (선택, Colab 이 끝난 뒤)**
+1. 셀 32 가 구글 드라이브에 `laptop_bundle.zip` 을 만든다 → 드라이브에서 다운로드.
+2. `C:\edge-adapt` 에 **그 폴더 안에서 압축 풀기**. 그러면 `C:\edge-adapt\models\` 에 `student.pt`, `student.onnx`, `teacher.pt` 가 생긴다(확인: `dir models`).
+3. 서버 창과 엣지 창에서(단계 4 와 같은 방식, `models_toy` 대신 `models`):
 ```
 python scripts/serve.py --models models --device cpu --codec pack4
-python scripts/demo.py --source C:\영상\내영상.mp4 --models models --server http://127.0.0.1:8000 --fps 2
+python scripts/demo.py --source stream --models models --server http://127.0.0.1:8000 --fps 2
 ```
-(영상에 정답 라벨이 없으면 mAP 대신 "평균 신뢰도" 곡선이 표시된다. 웹캠은 `--source 0`.)
-
----
+`--source stream` 은 번들에 들어 있는 평가 스트림이고, 내 영상 파일은 `--source C:\영상\내영상.mp4`, 웹캠은 `--source 0` 이다. 영상 파일·웹캠에는 정답 라벨이 없으므로 mAP 곡선 대신 "평균 신뢰도"가 표시된다.
 
 ## 막힐 때
 
